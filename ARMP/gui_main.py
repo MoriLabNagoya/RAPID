@@ -24,8 +24,6 @@ import csv
 from ARMP import resultWindow
 import shutil
 from ARMP.scrolledtreeview import ScrolledTreeview
-from keras_segmentation.predict import model_from_checkpoint_path
-#from keras_segmentation.models.unet import unet
 from ultralytics import YOLO
 import torch
 from ARMP.gui_imageframe import ROIs,COLORS,EachRootData
@@ -47,46 +45,6 @@ import os
 import glob
 import json
 
-from keras_segmentation.models.all_models import model_from_name
-
-
-def load_segmentation_model(checkpoint_path):
-
-    # 1. 读取配置
-    config_path = checkpoint_path + "_config.json"
-
-    with open(config_path, "r") as f:
-        config = json.load(f)
-
-    # 2. 重建模型
-    model = model_from_name[config["model_class"]](
-        config["n_classes"],
-        input_height=config["input_height"],
-        input_width=config["input_width"]
-    )
-
-    # 3. 找最新 checkpoint
-    index_files = glob.glob(checkpoint_path + ".*.index")
-
-    if not index_files:
-        raise FileNotFoundError(
-            f"No checkpoint found: {checkpoint_path}.*.index"
-        )
-
-    def get_epoch(path):
-        prefix = path[:-len(".index")]
-        return int(prefix.rsplit(".", 1)[-1])
-
-    latest_index = max(index_files, key=get_epoch)
-    latest_checkpoint = latest_index[:-len(".index")]
-
-    # 4. 加载权重
-    model.load_weights(latest_checkpoint)
-
-    print("Model loaded successfully!")
-    print("Loaded:", latest_checkpoint)
-
-    return model
 class MyScrolledTreeview(ScrolledTreeview):
     def __init__(self, master=None,head = None,height = None, data = None, **kw):
         ScrolledTreeview.__init__(
@@ -186,7 +144,6 @@ _RAPID_JA.update({
 "Save validation CSV":"検証 CSV を保存"
 })
 _RAPID_JA.update({
-    "Deep learning (U-Net)":"深層学習 (U-Net)",
     "Language":"言語",
     "Batch Processing":"バッチ処理",
     "Current shared scale":"現在の共通スケール",
@@ -294,7 +251,6 @@ class MainGUI(ttk.Frame):
         
         self.master.bind('<F6>', self.__SetResolution)  # reset default window geometry
         #self.master.bind('<F8>', self.__Threshold_toggle)  # reset default window geometry
-        self.master.bind('<F7>', self.__AI_toggle)  # reset default window geometry
         self.master.bind('<F9>', self.__ICML_NoAI_toggle)  # YOLO ROI + legacy ICML segmentation
         self.master.bind('<F10>', self.__ICML_Improve_toggle)  # YOLO ROI + conservative ICML improvements
         
@@ -639,8 +595,6 @@ class MainGUI(ttk.Frame):
         
         self.__process_menu = tk.Menu(self.__menubar, tearoff=False)
         self.__process_menu.add_command(label=self.__AI_Select_Label, command=self.__AI_Select)
-        self.__process_menu.add_command(label='U-Net', command=self.__AI_toggle,
-                                     accelerator='F7')
         self.__process_menu.add_command(label='ICWAPR', command=self.__ICML_NoAI_toggle,
                                      accelerator='F9')
         self.__process_menu.add_command(label='Journal', command=self.__ICML_Improve_toggle,
@@ -732,7 +686,6 @@ class MainGUI(ttk.Frame):
         if text in exact:
             return exact[text]
         substitutions = (
-            ("Deep-learning segmentation", "深層学習セグメンテーション"),
             ("ICML segmentation", "ICML セグメンテーション"),
             ("shared scale", "共通スケール"),
             ("low ruler confidence", "定規検出の信頼度が低い"),
@@ -857,9 +810,9 @@ class MainGUI(ttk.Frame):
                          row=0, column=1, sticky='w', pady=3)
 
         ttk.Label(controls, text=self._tr("Segmentation:")).grid(row=0, column=2, sticky='w', padx=(18, 5), pady=3)
-        self.batch_segmentation_var = tk.StringVar(value=self._tr("Deep learning (U-Net)"))
+        self.batch_segmentation_var = tk.StringVar(value="ICML-improve")
         ttk.Combobox(controls, textvariable=self.batch_segmentation_var, state='readonly', width=28,
-                     values=(self._tr("U-Net"), "ICML-NoAI", "ICML-improve")).grid(
+                     values=("ICML-NoAI", "ICML-improve")).grid(
                          row=0, column=3, sticky='w', pady=3)
 
         ttk.Label(controls, text=self._tr("Scale mode:")).grid(row=1, column=0, sticky='w', padx=(0, 5), pady=3)
@@ -1009,26 +962,6 @@ class MainGUI(ttk.Frame):
             return 'cpu'
         return '0' if torch.cuda.is_available() else 'cpu'
 
-    def _ensure_seg_model(self):
-    
-        if getattr(self, "_seg_model", None) is not None:
-            return self._seg_model
-    
-        base_dir = os.path.dirname(
-            os.path.abspath(__file__)
-        )
-    
-        checkpoint_path = os.path.join(
-            base_dir,
-            "checkpoints",
-            "vgg_unet"
-        )
-    
-        self._seg_model = load_segmentation_model(
-            checkpoint_path
-        )
-    
-        return self._seg_model
 
     def _apply_batch_scale(self, mode, shared_scale, physical_tick, tick_unit, min_confidence):
         """Set scale for current batch image. Return (status, message)."""
@@ -1113,28 +1046,23 @@ class MainGUI(ttk.Frame):
             scale_status = 'review'
             scale_message = (scale_message + '; ' if scale_message else '') + 'no YOLO ROI detected'
 
-        segmentation_method = settings.get('segmentation_method', 'Deep learning (U-Net)')
-        use_icml = segmentation_method in ('ICML-NoAI', 'ICML-improve')
-        if segmentation_method == 'ICML-improve':
-            segmentation_mode = 5
-        elif segmentation_method == 'ICML-NoAI':
+        segmentation_method = settings.get('segmentation_method', 'ICML-improve')
+        if segmentation_method == 'ICML-NoAI':
             segmentation_mode = 1
         else:
-            segmentation_mode = 4
-        seg_model = None if use_icml else self._ensure_seg_model()
+            segmentation_method = 'ICML-improve'
+            segmentation_mode = 5
         self.processing_method = segmentation_method
         crop_source = self._root_crop_source()
         for roi_idx, eachroot in enumerate(self.RootAll, start=1):
             if stage_callback:
                 if segmentation_method == 'ICML-improve':
                     stage_name = 'ICML-improve segmentation'
-                elif segmentation_method == 'ICML-NoAI':
-                    stage_name = 'ICML segmentation'
                 else:
-                    stage_name = 'Deep-learning segmentation'
+                    stage_name = 'ICML segmentation'
                 stage_callback(f"{stage_name} ROI {roi_idx}/{len(self.RootAll)}")
             eachroot.Generatebb(crop_source, segmentation_mode)
-            p = ar(eachroot.mImgCV, segmentation_mode, 0, 0, seg_model)
+            p = ar(eachroot.mImgCV, segmentation_mode, 0, 0)
             p.Processing()
             eachroot.prop = p.Get().copy()
             eachroot.roilabel = p.GetLabel().copy()
@@ -1219,14 +1147,11 @@ class MainGUI(ttk.Frame):
         self.batch_progress['value'] = 0
         self.batch_progress_text.set(f"0 / {len(self.imgList)}")
         seg_method = settings['segmentation_method']
-        if seg_method in ('ICML-NoAI', 'ICML-improve'):
-            device_label = resolved_device.upper() if resolved_device != '0' else 'GPU 0'
-            self.batch_current_text.set(self._loc(
-                f"Loading YOLO on {device_label}; {seg_method} uses no U-Net...",
-                f"{device_label} で YOLO を読み込み中; {seg_method} は U-Net を使用しません..."
-            ))
-        else:
-            self.batch_current_text.set(self._loc(f"Loading YOLO + U-Net on {resolved_device.upper() if resolved_device != '0' else 'GPU 0'}...", f"{resolved_device.upper() if resolved_device != '0' else 'GPU 0'} で YOLO + U-Net を読み込み中..."))
+        device_label = resolved_device.upper() if resolved_device != '0' else 'GPU 0'
+        self.batch_current_text.set(self._loc(
+            f"Loading YOLO on {device_label}; segmentation: {seg_method}...",
+            f"{device_label} で YOLO を読み込み中; セグメンテーション: {seg_method}..."
+        ))
         self.batch_counts_text.set(self._loc("Done: 0    Failed: 0    Review: 0    Skipped: 0", "完了: 0    失敗: 0    要確認: 0    スキップ: 0"))
         self.button.configure(state='disabled')
         self.buttonPauseBatch.configure(state='normal')
@@ -1245,11 +1170,8 @@ class MainGUI(ttk.Frame):
         log_path = os.path.join(self.proPath, 'batch_log.csv')
         log_exists = os.path.isfile(log_path) and os.path.getsize(log_path) > 0
         try:
-            # YOLO is always used to localize root ROIs.  U-Net is needed only
-            # when the selected within-ROI segmentation method is deep learning.
+            # YOLO localizes root ROIs; ICML performs within-ROI segmentation.
             self._ensure_yolo_model()
-            if settings.get('segmentation_method') not in ('ICML-NoAI', 'ICML-improve'):
-                self._ensure_seg_model()
             with open(log_path, 'a', newline='', encoding='utf-8-sig') as log_f:
                 writer = csv.writer(log_f)
                 if not log_exists:
@@ -2854,10 +2776,11 @@ This software is supported by Moonshot Goal 3.""")
     def ProcessROI(self,idx):    
         if 1:
                    mode = int(self.RootAll[idx].prsMode)
-                   # ICML-NoAI (mode 1) and ICML-improve (mode 5) are classical paths.
-                   # TensorFlow/U-Net is loaded only for deep-learning modes.
-                   seg_model = self._ensure_seg_model() if mode in (3, 4) else None
-                   p = ar(self.RootAll[idx].mImgCV, mode, 0, 0, seg_model)
+                   # Supported segmentation modes: ICML-NoAI (1) and ICML-improve (5).
+                   if mode not in (1, 5):
+                       mode = 5
+                       self.RootAll[idx].prsMode = mode
+                   p = ar(self.RootAll[idx].mImgCV, mode, 0, 0)
                    p.Processing()
                    prop = p.Get()
                    rlabel = p.GetLabel()
@@ -2895,28 +2818,6 @@ This software is supported by Moonshot Goal 3.""")
             pending.append(idx)
 
         return pending
-
-    def __AI_toggle(self, event=None):
-        if self.curImage is None:
-            return
-        if len(self.RootAll) == 0:
-            self.__AI_Select(event)
-        if len(self.RootAll) == 0:
-            self.status_var.set(self._loc("Deep learning: YOLO did not detect any ROI", "深層学習: YOLO は ROI を検出できませんでした"))
-            return
-
-        self.processing_method = "Deep learning (U-Net)"
-        pending = self._prepare_unprocessed_rois(4)
-        if not pending:
-            self.status_var.set(self._loc("Deep learning: all ROIs are already processed", "深層学習: すべての ROI は処理済みです"))
-            return
-
-        preserved = len(self.RootAll) - len(pending)
-        self.status_var.set(self._loc(
-            f"Deep learning: processing {len(pending)} unprocessed ROI(s); {preserved} processed ROI(s) preserved",
-            f"深層学習: 未処理 ROI {len(pending)} 件を処理中; 処理済み ROI {preserved} 件を保持"
-        ))
-        self.ProcessNOThreads(pending)
 
     def GetModePixle(self,im):
         vals,counts = np.unique(im, return_counts=True)
@@ -3092,7 +2993,7 @@ This software is supported by Moonshot Goal 3.""")
         if not pts_nodes or not any(pts.get("maskfile") for pts in pts_nodes):
             return None
 
-        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0, None)
+        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0)
         props = []
         rlabel = np.zeros(roi_shape, dtype=np.uint16)
         semantic = np.zeros(roi_shape, dtype=np.uint8)
@@ -3396,7 +3297,7 @@ This software is supported by Moonshot Goal 3.""")
         # ``roi_image`` is used by ICML-improve leaf-instance estimation.
         # Without it, connected leaf blades would collapse back to one leaf
         # when an edited semantic mask is reconstructed.
-        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0, None)
+        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0)
         props = []
         rlabel = np.zeros(semantic.shape, dtype=np.uint16)
         instance_id = 0
@@ -3993,7 +3894,7 @@ This software is supported by Moonshot Goal 3.""")
         self.bNeedRotate = False
         self.rotation_direction = 'none'
         self.RootAll = list() #add EachRootData
-        self.processing_method = getattr(self, 'processing_method', 'Deep learning (U-Net)')
+        self.processing_method = getattr(self, 'processing_method', 'ICML-improve')
         
         # Deep-learning models are intentionally not recreated here.  They are
         # loaded lazily once and reused by interactive and batch processing.
@@ -4102,7 +4003,8 @@ This software is supported by Moonshot Goal 3.""")
                     rbx = int(item.find('rbx').text)
                     rby = int(item.find('rby').text)
                     eachroot = EachRootData(ROIs([(ltx, lty), (rbx, rby)], True))
-                    eachroot.Generatebb(cv2.cvtColor(self.curImage, cv2.COLOR_BGR2RGB), 4)
+                    restored_mode = 1 if getattr(self, 'processing_method', '') == 'ICML-NoAI' else 5
+                    eachroot.Generatebb(cv2.cvtColor(self.curImage, cv2.COLOR_BGR2RGB), restored_mode)
                     roi_shape = eachroot.mImgCV.shape[:2]
 
                     semantic = None
@@ -4151,7 +4053,7 @@ This software is supported by Moonshot Goal 3.""")
                         eachroot.roilabel = rlabel
                     else:
                         # Backward-compatible fallback for old XML files that only saved paths.
-                        p = ar(None, 1, 1, 0, None)
+                        p = ar(None, 1, 1, 0)
                         rlabel = np.zeros(roi_shape, dtype=np.uint8)
                         props = []
                         sem = np.zeros(roi_shape, dtype=np.uint8)

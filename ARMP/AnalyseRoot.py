@@ -26,7 +26,6 @@ from scipy.sparse.csgraph import dijkstra
 #import skimage.filters.thresholding
 import math
 import heapq
-IMAGE_SIZE = 256
 ROOTTYPES =['None','Leaf','Primary root','Lateral root','External root']
 from scipy.ndimage import convolve
 
@@ -80,13 +79,12 @@ class Node:
     def __lt__(self, other):
         return self.f < other.f
 class AnalyseRoot:
-    def __init__(self,im,method,bsave,Show,Unet):
+    def __init__(self,im,method,bsave,Show):
         #print("Init")
         self._image = im
         self._method = method
         self._bSave = bsave
         self._bShowImg = Show
-        self.Unet= Unet
         self.mRootProp =list()
     
 
@@ -3166,105 +3164,4 @@ class AnalyseRoot:
             out = np.zeros_like(bw)
             cv2.drawContours(out, filtered_contours, -1, 1, thickness=cv2.FILLED)   
             self.mlabel = out
-        elif self._method ==3: #u-net 
-                #print("Deep learning")
-                #alpha = 1.75 # Contrast control (1.0-3.0)
-                #beta = 50 # Brightness control (0-100)
-                #image0 = cv2.convertScaleAbs(self._image, alpha=alpha, beta=beta)
-                
-                inimg = cv2.resize(self._image,(IMAGE_SIZE,IMAGE_SIZE), interpolation = cv2.INTER_LINEAR_EXACT)
-                out = self.Unet.predict_segmentation(inimg)
-                leafm = out==2
-                rootm = out ==1
-                
-                
-                leaf = cv2.resize(leafm.astype(np.uint8),(width,height), interpolation = cv2.INTER_LINEAR_EXACT)
-                root = cv2.resize(rootm.astype(np.uint8),(width,height), interpolation = cv2.INTER_LINEAR_EXACT)
-                #out[out==2]=0
-                out =  root.copy()
-                
-                if self._bShowImg:
-                    #print("out")
-                    cv2.imshow("leaf",leaf.astype(np.uint8)*255)
-                    cv2.imshow("root",root.astype(np.uint8)*255)
-                    
-        elif self._method ==4: #u-net guilded
-               burimage = cv2.GaussianBlur(self._image, (5, 5), 0)
-               inimg = burimage#cv2.cvtColor(burimage, cv2.COLOR_BGR2RGB)
-               out = self.Unet.predict_segmentation(inimg)
-               leafm = out==2
-               rootm = out ==1
-               leaf = cv2.resize(leafm.astype(np.uint8),(width,height), interpolation = cv2.INTER_LINEAR_EXACT)
-               root = cv2.resize(rootm.astype(np.uint8),(width,height), interpolation = cv2.INTER_LINEAR_EXACT)
-               leaf = self.Processleaf(leaf)
-               binm =  leaf+root
-               self.labelU = binm
-               gray = cv2.cvtColor(self._image,cv2.COLOR_BGR2GRAY)
-               clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
-               egray = clahe.apply(gray)
-               if np.sum(rootm)>300:
-                  th,out =  self.threshold_optimization(egray,binm)
-               else:
-                  th,out = cv2.threshold(gray,0,1,cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-               out[leaf==1]=0
-               out = self.PostProcess(out)
-                
-               if np.sum(leaf)>0:
-                    prop = self.GetLeafFromMask(leaf)
-                    navigate = prop.pt
-                    self.mRootProp.append(prop)   
-               self.mlabel = out
-               skeleton0 = morphology.skeletonize(out)
-               
-               #endpoints = find_endpoints(skeleton0)
-               #pairs = self.match_endpoints(endpoints, max_dist=20)
-               #skeleton_filled = self.draw_kalman_bridges(skeleton0.copy(), pairs)
-               
-               
-               white_pixels = np.argwhere(skeleton0 == 1)
-               # 找到最低点的坐标
-               start_point = tuple(white_pixels[np.argmax(white_pixels[:, 0])])
-               mainpath= self.astar_closest(skeleton0, start_point, navigate)
-               #mainpath = self.checkMore(mainpath,skeleton0, start_point,1)# check neighbor for more 
-               mainpath,branch_data, g0, c0, skeleton = self.ValidateAndCombine(leaf,mainpath,start_point, navigate)
-               
- 
-               sumLong=0
-               for k in range(0,len(mainpath)-1):
-                       x,y = mainpath[k]
-                       m,n = mainpath[k+1]
-                       dist = (x-m)*(x-m)+(y-n)*(y-n)
-                       sumLong = sumLong+np.sqrt(dist)
-               ed = mainpath[-1]
-               st = mainpath[0]
-               dist = (st[0]-ed[0])*(st[0]-ed[0])+(st[1]-ed[1])*(st[1]-ed[1])
-               pt = (start_point[0],start_point[1]+10)
-               self.mRootProp.append(RootProp(sumLong, np.sqrt(dist), mainpath, 2,pt,self.Pt2Mask(mainpath,2),0))
-               
-               srcIdxSet =branch_data["node-id-src"]
-               desIdxSet = branch_data["node-id-dst"]
-               branchPath= branch_data["branch-distance"]
-               branchDistance= branch_data["euclidean-distance"]
-               
-               target =3
-               for i in range(0,len(branch_data)-1):# does not consider start and end point
-                    if branchPath[i]>15:
-                       srcIdx = srcIdxSet[i]
-                       desIdx = desIdxSet[i]
-                       
-                       coordss = (int(c0[0][srcIdx]),int(c0[1][srcIdx]))#point coordinate
-                       coorddd = (int(c0[0][desIdx]),int(c0[1][desIdx]))#point coordinate
-                       bss = self.JudgeMain(coordss,mainpath)
-                       bdd = self.JudgeMain(coorddd,mainpath)
-                       subpath  = skeleton.path_coordinates(i)
-                       if self.JudgeOverirde(subpath,mainpath):
-                           #print("Not a lateral root")
-                           continue
-                       elif bss or bdd:
-                           pt, direct =0,(0,0)
-                           #direct = 1 if bss else (-1 if bdd else 0)
-                           direct = 1 if bss else -1
-                           pt = coorddd if bss else coordss
-                           self.mRootProp.append(RootProp(branchPath[i], branchDistance[i], subpath.copy(), target,pt,self.Pt2Mask(subpath,target),direct))
-                           target = target +1
     

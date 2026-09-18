@@ -155,7 +155,7 @@ class RootResult:
     @staticmethod
     def _component_props(semantic, img_type, roi_image=None):
         """Convert an instance-aware semantic mask into measurable RootProp objects."""
-        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0, None)
+        processor = ar(roi_image, 5 if roi_image is not None else 1, 1, 0)
         props = []
         instance_label = np.zeros(semantic.shape, dtype=np.uint16)
         instance_id = 0
@@ -257,7 +257,7 @@ class RootResult:
         if not np.any(leaf):
             return []
         try:
-            processor = ar(self.OrigImage, 5, 1, 0, None)
+            processor = ar(self.OrigImage, 5, 1, 0)
             prop = processor.GetLeafFromMaskImproved(leaf)
             labels = np.asarray(getattr(prop, "leaf_instance_labels", None))
             if labels.shape == leaf.shape and np.max(labels) > 0:

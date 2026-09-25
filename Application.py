@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import tkinter as tk
-
+import sys
 from ARMP.logic_logger import LogInitialize, logging
 from ARMP.gui_main import MainGUI
 #Previous method is tool->Process 
@@ -13,7 +13,10 @@ if __name__ == '__main__':
     os.chdir(cur_dir)  
     root = tk.Tk()
     
-    root.iconbitmap(os.path.join(cur_dir, r"ARMP\root.ico"))
+
+    if sys.platform.startswith("win"):
+        root.iconbitmap(os.path.join(cur_dir, "ARMP", "root.ico"))
+    #root.iconbitmap(os.path.join(cur_dir, r"ARMP\root.ico"))
     app = MainGUI(root)
     root.mainloop()
     logging.info('RAPID exit')

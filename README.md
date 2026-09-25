@@ -8,8 +8,8 @@ The legacy Keras/TensorFlow U-Net path has been removed because in the current s
 RAPID now uses:
 
 - YOLO for ROI detection (`best.pt`)
-- `ICML-NoAI` for the legacy classical segmentation path
-- `ICML-improve` as the default segmentation path
+- `ICWAPR` is the method presented in ICWAPR 2023 in Japan. 
+- `Journal` is the method described in journal. (under review)
 
 ## Recommended Windows/ubuntu environment
 

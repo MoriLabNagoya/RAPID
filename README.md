@@ -32,6 +32,10 @@ python -m pip install --upgrade pip setuptools wheel
 python -m pip install --no-cache-dir -r requirements.txt
 python Application.py
 ```
+Here is an example of the process images.
+<p align="center">
+  <img src="images/result.jpg" width="700">
+</p>
 If you get error related to "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x8c in position 160: invalid start byte", just remove temp foloder and make a new one.
 
 If an older `rapid` environment contains incompatible NumPy/scikit-image binaries, recreating the environment is recommended instead of installing over the old environment.
